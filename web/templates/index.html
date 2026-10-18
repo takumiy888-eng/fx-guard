@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0f14">
+<title>FX Guard</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="login" class="login hidden">
+  <div class="login-card">
+    <div class="brand big"><span class="logo">◆</span> FX Guard</div>
+    <p class="muted small">負けを小さく抑える自動売買Bot</p>
+    <input id="pw" type="password" placeholder="パスワード" autocomplete="current-password">
+    <button id="btnLogin" class="primary wide">ログイン</button>
+    <p id="loginMsg" class="neg small"></p>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <header class="top">
+    <div class="brand"><span class="logo">◆</span> FX Guard</div>
+    <span id="stateChip" class="chip">—</span>
+    <span class="chip demo">仮想資金</span>
+  </header>
+
+  <main>
+    <!-- ホーム -->
+    <section id="v-home" class="view active">
+      <div id="setupBanner" class="banner hidden">⏳ <b>初回準備中</b>：GMOコインから過去約2.5年分のレートを取得し、学習しています（30分ほど）。終わると自動で運用が始まるので、この画面は閉じて大丈夫です。<div id="setupState" class="small muted"></div></div>
+      <div id="deadBanner" class="banner bad hidden">Botが応答していません（数分以上更新なし）。VPSが止まっている可能性があります。</div>
+      <div class="hero card">
+        <div class="l">仮想資金</div>
+        <div class="big-num" id="hEquity">—</div>
+        <div id="hTotal" class="sub">—</div>
+        <div class="target">
+          <div class="row between small"><span>今月 <b id="hMonth">—</b></span><span class="muted">目標 <span id="hTarget">5</span>%</span></div>
+          <div class="bar"><div id="hMonthBar"></div><i id="hTargetMark"></i></div>
+        </div>
+        <div class="trio">
+          <div><div class="l">今日</div><div id="hDay" class="v">—</div></div>
+          <div><div class="l">今週</div><div id="hWeek" class="v">—</div></div>
+          <div><div class="l">最高値から</div><div id="hDD" class="v">—</div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>リスク段階（1回の最大損失）</h2>
+        <div id="ladder" class="ladder"></div>
+        <p id="riskNote" class="muted small"></p>
+      </div>
+
+      <div class="card"><h2>資産推移</h2><canvas id="eqChart" height="180"></canvas><p id="eqNote" class="muted small"></p></div>
+
+      <div class="card"><h2>保有ポジション</h2><div id="posList"></div></div>
+      <div class="card"><h2>直近の重要指標</h2><div id="evList"></div></div>
+      <div class="card"><div class="row between"><h2>最近の思考ログ</h2><a class="link" data-go="log">すべて</a></div><div id="homeLog"></div></div>
+
+      <div class="actions">
+        <button id="btnPause" class="ghost">一時停止</button>
+        <button id="btnLearn" class="ghost">今すぐ学習</button>
+      </div>
+    </section>
+
+    <!-- 取引 -->
+    <section id="v-trades" class="view">
+      <div class="kpis" id="trKpis"></div>
+      <div id="trList"></div>
+    </section>
+
+    <!-- 思考ログ -->
+    <section id="v-log" class="view">
+      <div class="chips" id="logFilter">
+        <button data-k="" class="on">すべて（見送り以外）</button><button data-k="learn">学習</button><button data-k="risk">リスク</button>
+        <button data-k="trade">取引</button><button data-k="skip">見送り</button><button data-k="system">システム</button><button data-k="error">エラー</button>
+      </div>
+      <div id="logList" class="loglist"></div>
+    </section>
+
+    <!-- 学習 -->
+    <section id="v-learn" class="view">
+      <div id="learnEmpty" class="banner hidden">まだ学習していません。設定完了後に自動で初回学習を行います。</div>
+      <div id="learnBody" class="hidden">
+        <div class="card"><h2>1万円バックテスト（最新ルール）</h2><div id="replayCards" class="kpis"></div><canvas id="monthChart" height="170"></canvas><p class="muted small" id="replayNote"></p></div>
+        <div class="card"><h2>今回の学習で考えたこと</h2><ul id="notes" class="notes"></ul><p class="muted small" id="learnMeta"></p></div>
+        <div class="card"><h2>成績（R＝1回の損切り額を1とした単位）</h2><div id="statTbl"></div></div>
+        <div class="card"><h2>学習した「入らない条件」</h2><div id="blockList"></div></div>
+        <div class="card"><h2>条件別の成績（悪い順）</h2><div id="condTbl" class="scroll"></div></div>
+        <div class="card"><h2>見送ったシグナルの仮想成績（影のトレード）</h2><div id="shadowTbl"></div><p class="muted small">平均Rがマイナスなら、そのフィルターは負けを避けられている証拠です。</p></div>
+        <div class="card"><h2>現在のパラメータと変更履歴</h2><div id="paramTbl"></div><div id="histTbl" class="scroll"></div></div>
+      </div>
+    </section>
+
+    <!-- 設定 -->
+    <section id="v-settings" class="view">
+      <div class="card">
+        <h2>データ元</h2>
+        <p class="small">GMOコイン 外国為替FX の公開レート（登録・口座開設なし）。売買は実際の売値・買値を使ってBotの中で仮想的に行います。お金は動きません。</p>
+        <div class="row wrap"><button id="btnSaveConn" class="ghost">レート取得を確認</button><span id="connMsg" class="small"></span></div>
+        <div id="connPrices"></div>
+      </div>
+      <div class="card">
+        <h2>運用</h2>
+        <div class="field"><label>通貨ペア</label><input id="sPairs"></div>
+        <div class="grid2">
+          <div class="field"><label>仮想資金（円・リセット時に反映）</label><input id="sCapital" type="number" step="1000"></div>
+          <div class="field"><label>月間目標（%）</label><input id="sTarget" type="number" step="0.5"></div>
+        </div>
+        <div class="field"><label>Discord通知URL（Webhook）</label><input id="sDiscord" placeholder="https://discord.com/api/webhooks/..."></div>
+        <div class="row wrap"><button id="btnSave" class="primary">保存</button><span id="saveMsg" class="small"></span></div>
+      </div>
+      <div class="card">
+        <h2>パスワード変更</h2>
+        <div class="grid2"><input id="pwCur" type="password" placeholder="現在"><input id="pwNew" type="password" placeholder="新しいパスワード（8文字以上）"></div>
+        <div class="row wrap" style="margin-top:8px"><button id="btnPw" class="ghost">変更</button><span id="pwMsg" class="small"></span></div>
+      </div>
+      <div class="card danger">
+        <h2>緊急操作</h2>
+        <div class="row wrap"><button id="btnCloseAll" class="ghost red">全ポジションを決済</button><button id="btnReset" class="ghost red">仮想資金をリセット</button><button id="btnLogout" class="ghost">ログアウト</button></div>
+      </div>
+    </section>
+  </main>
+
+  <nav class="tabbar">
+    <button data-v="home" class="on"><span>◉</span>ホーム</button>
+    <button data-v="trades"><span>⇅</span>取引</button>
+    <button data-v="log"><span>☰</span>思考ログ</button>
+    <button data-v="learn"><span>✦</span>学習</button>
+    <button data-v="settings"><span>⚙</span>設定</button>
+  </nav>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>
