@@ -100,6 +100,13 @@
         <div class="row wrap"><button id="btnSaveConn" class="ghost">レート取得を確認</button><span id="connMsg" class="small"></span></div>
         <div id="connPrices"></div>
       </div>
+      <div id="phoneCard" class="card hidden">
+        <h2>スマホから見る（同じWi-Fi）</h2>
+        <p class="small">スマホのブラウザでこのURLを開き、パスワードでログインしてください。PCとスマホが同じWi-Fiにつながっている時だけ見られます。</p>
+        <div class="item"><div class="t">URL</div><div class="num" id="phoneUrl"></div></div>
+        <div class="item"><div class="t">パスワード</div><div class="num" id="phonePw"></div></div>
+        <p class="muted small">初回はWindowsの「アクセスを許可しますか」が出ることがあります。「プライベート ネットワーク」で許可してください。</p>
+      </div>
       <div class="card">
         <h2>運用</h2>
         <div class="field"><label>通貨ペア</label><input id="sPairs"></div>

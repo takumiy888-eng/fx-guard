@@ -28,6 +28,12 @@ app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
                   PERMANENT_SESSION_LIFETIME=60 * 60 * 24 * 30)
 
 _fails: dict[str, list[float]] = {}
+LOCAL = os.environ.get("FXGUARD_LOCAL") == "1"   # PC版（run_local.py）
+
+
+def is_local_request() -> bool:
+    """PC版で、そのPC自身のブラウザからのアクセスならパスワード不要"""
+    return LOCAL and request.remote_addr in ("127.0.0.1", "::1")
 
 
 def ok(**kw):
@@ -41,7 +47,7 @@ def err(msg, code=400):
 def login_required(f):
     @wraps(f)
     def w(*a, **kw):
-        if not session.get("auth"):
+        if not session.get("auth") and not is_local_request():
             return err("ログインが必要です", 401)
         return f(*a, **kw)
     return w
@@ -54,7 +60,8 @@ def index():
 
 @app.post("/api/login")
 def login():
-    ip = request.headers.get("X-Forwarded-For", request.remote_addr or "?").split(",")[0].strip()
+    ip = (request.remote_addr or "?") if LOCAL else \
+        request.headers.get("X-Forwarded-For", request.remote_addr or "?").split(",")[0].strip()
     now = time.time()
     recent = [t for t in _fails.get(ip, []) if now - t < 600]
     if len(recent) >= 5:
@@ -78,7 +85,17 @@ def logout():
 
 @app.get("/api/me")
 def me():
-    return ok(auth=bool(session.get("auth")))
+    return ok(auth=bool(session.get("auth")) or is_local_request(), local=is_local_request())
+
+
+@app.get("/api/local_info")
+@login_required
+def local_info():
+    """PC版：同じWi-Fiのスマホから見るためのURLとパスワード（そのPCからのアクセスにだけ返す）"""
+    if not is_local_request():
+        return ok(available=False)
+    return ok(available=True, url=os.environ.get("FXGUARD_LAN_URL", ""),
+              password=store._sec().get("phone_password", ""))
 
 
 @app.get("/api/overview")

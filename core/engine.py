@@ -165,9 +165,11 @@ class Engine:
 
     def _learn_due(self, cfg, now) -> bool:
         j = now.astimezone(JST)
+        last = self.db.kv_get("last_learn_at")
+        if last and now - datetime.fromisoformat(last) > timedelta(days=7, hours=12):
+            return True  # 土曜にPCが止まっていた週は、次に動いた時に学習する
         if j.weekday() != int(cfg["learn_weekday"]) or j.hour < int(cfg["learn_hour_jst"]):
             return False
-        last = self.db.kv_get("last_learn_at")
         return not last or datetime.fromisoformat(last).astimezone(JST).date() != j.date()
 
     def _learn(self, reason: str):

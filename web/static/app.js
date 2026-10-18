@@ -134,6 +134,11 @@ async function loadSettings() {
   $("#sCapital").value = c.virtual_capital;
   $("#sTarget").value = c.monthly_target_pct;
   $("#sDiscord").value = c.discord_webhook || "";
+  try {
+    const li = await api("/api/local_info");
+    $("#phoneCard").classList.toggle("hidden", !li.available);
+    if (li.available) { $("#phoneUrl").textContent = li.url; $("#phonePw").textContent = li.password; }
+  } catch (e) { /* VPS版では表示しない */ }
 }
 $("#btnSaveConn").onclick = async () => {
   const m = $("#connMsg"); m.textContent = "確認中…"; m.className = "small muted";
