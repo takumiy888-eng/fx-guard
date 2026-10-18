@@ -77,12 +77,36 @@ class PaperAccount:
                           "minimumTradeSize": "1"}
         return out
 
-    # ------------------------------------------------------------ ローソク足（仲値＝Bid＋標準スプレッドの半分）
+    # ------------------------------------------------------------ ローソク足（仲値と実際のスプレッド）
     def _half_spread(self, pair: str) -> float:
         return DEFAULT_SPREAD.get(pair, 1.0) * pip(pair) / 2
 
     def _mid(self, pair: str, bid: pd.DataFrame) -> pd.DataFrame:
-        return bid + self._half_spread(pair)
+        """売値と買値の足から仲値を作る。買値が無い時間は 売値＋標準スプレッドの半分 で補う。
+        spread 列 = その足の始値時点の実際のスプレッド（価格差）。バックテストで使う"""
+        bid = bid[["open", "high", "low", "close"]]
+        ask = self.candles.ask(pair).reindex(bid.index)
+        dflt = self._half_spread(pair) * 2
+        filled = ask.isna().any(axis=1)
+        ask = ask.where(~filled, bid + dflt)
+        mid = (bid + ask) / 2
+        # 高値・安値は売値と買値で同時刻とは限らないので、四本値の整合を取り直す
+        mid["high"] = mid[["open", "high", "low", "close"]].max(axis=1)
+        mid["low"] = mid[["open", "high", "low", "close"]].min(axis=1)
+        mid["spread"] = (ask["open"] - bid["open"]).clip(lower=0)
+        mid.loc[filled, "spread"] = dflt
+        return mid
+
+    def ask_ready(self, pairs: list[str], start=None) -> bool:
+        """学習に使う期間（start 以降）の買値データが揃っているか"""
+        for p in pairs:
+            b, a = self.candles.bid(p), self.candles.ask(p)
+            if len(a) == 0 or len(b) == 0:
+                return False
+            need = max(b.index[0], pd.Timestamp(start)) if start is not None else b.index[0]
+            if a.index[0] > need + pd.Timedelta(days=7) or a.index[-1] < b.index[-1] - pd.Timedelta(days=7):
+                return False
+        return True
 
     def recent_df(self, pair: str, granularity: str, count: int) -> pd.DataFrame:
         now = self.clock()
@@ -94,14 +118,20 @@ class PaperAccount:
         elif due is None or now >= due:
             new = 0
             try:
-                new = self.candles.refresh(pair)
+                new = self.candles.refresh(pair, side="BID")
+                self.candles.refresh(pair, side="ASK")
             finally:
                 # 新しい足がまだ無ければ1分後にもう一度
                 self._next_refresh[pair] = now + timedelta(minutes=0 if new else 1)
         return self._mid(pair, self.candles.bid(pair).tail(count))
 
     def history_df(self, pair: str, granularity: str, start, end, progress=None) -> pd.DataFrame:
-        df = self.candles.ensure(pair, start, progress)
+        def stage(k):  # 売値（前半）・買値（後半）で進み具合を分ける
+            if not progress:
+                return None
+            return lambda pr, d, i, n: progress(pr, d, i + k * n, 2 * n)
+        df = self.candles.ensure(pair, start, stage(0), side="BID")
+        self.candles.ensure(pair, start, stage(1), side="ASK")
         df = df[(df.index >= pd.Timestamp(start)) & (df.index <= pd.Timestamp(end))]
         return self._mid(pair, df)
 
@@ -155,12 +185,19 @@ class PaperAccount:
             sp = DEFAULT_SPREAD.get(pair, 1.0) * pip(pair)
             slip = self._slip(pair)
             # 1) 確定した1時間足で判定（チェックの合間・停止中の値動きを拾う）
+            #    買いは売値の足、売りは買値の足（無い時間は 売値＋標準スプレッド）で判定
             bars = self.candles.bid(pair)
+            asks = self.candles.ask(pair)
             since = pd.Timestamp(max(t["sl_since"], t["checked_until"]))
             first_bar = since.ceil("h")
             bars = bars[bars.index >= first_bar]
             for ts, bar in bars.iterrows():
                 o, hi, lo = bar.open, bar.high, bar.low
+                if d == -1 and ts in asks.index:
+                    ab = asks.loc[ts]
+                    sp_o, sp_h, sp_l = ab.open - o, ab.high - hi, ab.low - lo
+                else:
+                    sp_o = sp_h = sp_l = sp
                 if d == 1:            # 買いは Bid で決済
                     if o <= t["sl"]:
                         px, why = o - slip, self._stop_reason(t) + "(窓)"
@@ -171,7 +208,7 @@ class PaperAccount:
                     else:
                         px = None
                 else:                 # 売りは Ask（Bid＋標準スプレッド）で決済
-                    ao, ah, al = o + sp, hi + sp, lo + sp
+                    ao, ah, al = o + sp_o, hi + sp_h, lo + sp_l
                     if ao >= t["sl"]:
                         px, why = ao + slip, self._stop_reason(t) + "(窓)"
                     elif ah >= t["sl"]:

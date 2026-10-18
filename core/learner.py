@@ -68,7 +68,8 @@ class Learner:
                     self.db.log("system", f"{pair} の価格データが取得できなかったため、学習から外しました（{e}）")
                     continue
                 self.db.log("system", f"{pair} の価格データ更新に失敗。保存済みデータで学習します（{e}）")
-            out[pair] = df[df.index >= start][["open", "high", "low", "close"]]
+            cols = [c for c in ("open", "high", "low", "close", "spread") if c in df.columns]
+            out[pair] = df[df.index >= start][cols]
         return out
 
     def events_for(self, start, end) -> EventIndex:

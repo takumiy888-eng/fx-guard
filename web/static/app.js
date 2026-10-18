@@ -42,14 +42,14 @@ let OV = null;
 async function loadHome() {
   const o = (OV = await api("/api/overview"));
   const s = o.status || {};
-  const preparing = /初回|過去データ/.test(s.state || "") || (!o.learned_at && !s.state);
+  const preparing = /初回|過去データ|買値データ/.test(s.state || "") || (!o.learned_at && !s.state);
   $("#setupBanner").classList.toggle("hidden", !preparing);
   $("#setupState").textContent = preparing && s.state ? "いまの状態：" + s.state : "";
   $("#deadBanner").classList.toggle("hidden", !s.updated || o.alive);
   $("#edgeBanner").classList.toggle("hidden", !/様子見/.test(s.state || ""));
   const chip = $("#stateChip");
   const st = !o.alive && s.updated ? "Bot応答なし" : s.state || "起動待ち";
-  chip.textContent = /初回|過去データ/.test(st) ? "初回準備中" : st.length > 10 ? st.slice(0, 10) + "…" : st;
+  chip.textContent = /初回|過去データ|買値データ/.test(st) ? "準備中" : st.length > 10 ? st.slice(0, 10) + "…" : st;
   chip.className = "chip " + (st === "稼働中" ? "ok" : /停止|応答なし/.test(st) ? "stop" : "wait");
   $("#hEquity").textContent = yen(s.equity);
   $("#hTotal").innerHTML = s.capital ? `<span class="${cls(s.total_pct)}">${pct(s.total_pct)}</span> <span class="muted small">（開始 ${yen(s.capital)}・${o.started_at ? jst(o.started_at).slice(0, 5) + "〜" : ""}）</span>` : "";

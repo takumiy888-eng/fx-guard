@@ -116,6 +116,23 @@ class Engine:
             if self.db.kv_get("learning") is None:  # 初回学習が終わるまでは売買しない
                 self._status(cfg, state="初回学習の再試行待ち", now=now)
                 return
+        elif not self.db.kv_get("ask_ready") and hasattr(self.client, "ask_ready"):
+            # 買値（ASK）の過去データがまだ無ければ、取得して実際のスプレッドで学習し直す（初回だけ・約30分）
+            need_from = now - timedelta(days=int(365 * float(cfg["history_years"])))
+            if self.client.ask_ready(self.pairs, need_from):
+                self.db.kv_set("ask_ready", True)
+            else:
+                last = self.db.kv_get("ask_attempt_at")
+                if not last or now - datetime.fromisoformat(last) > timedelta(hours=6):
+                    self.db.kv_set("ask_attempt_at", now.isoformat())
+                    self.db.log("system", "買値の過去データを取得して、実際のスプレッドで学習し直します（30分ほど）")
+                    before = (self.db.kv_get("learning") or {}).get("ran_at")
+                    self._learn("買値データの取得と再学習")
+                    learned = (self.db.kv_get("learning") or {}).get("ran_at") != before
+                    if learned or self.client.ask_ready(self.pairs, need_from):
+                        # 学習まで終われば完了扱い（取れなかった日は週次学習のたびに自動で補う）
+                        self.db.kv_set("ask_ready", True)
+                        self.db.log("system", "買値の過去データがそろいました。以後は実際の売値・買値で検証します")
         elif self._learn_due(cfg, now):
             self._status(cfg, state="週次学習中", now=now)
             self._learn("週次学習")

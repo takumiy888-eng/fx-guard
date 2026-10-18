@@ -18,8 +18,10 @@ H = pd.Timedelta(hours=1)
 
 
 class FakeGMO:
-    def __init__(self, mid: dict[str, pd.DataFrame], extra_symbols=("NZD_JPY",)):
+    def __init__(self, mid: dict[str, pd.DataFrame], extra_symbols=("NZD_JPY",), spread_by_jst_hour=None):
+        """spread_by_jst_hour: {日本時間の時: スプレッド(pips)} 指定した時間だけスプレッドを変える（早朝の拡大など）"""
         self.mid = mid
+        self.sp_hour = spread_by_jst_hour or {}
         self.now = None
         self.calls: dict[str, int] = {}
         self.extra = list(extra_symbols)
@@ -27,11 +29,19 @@ class FakeGMO:
         self.fail_next = 0
         # 日付ごとに事前に分割（高速化）
         self.by_date = {}
+        self.ask_by_date = {}
         for p, df in mid.items():
-            hs = DEFAULT_SPREAD.get(p, 1.0) * pip(p) / 2
-            bid = df - hs
+            sp = self._spread_series(p, df.index)
+            bid = df.sub(sp / 2, axis=0)
+            ask = df.add(sp / 2, axis=0)
             keys = np.array([gmo_date(t) for t in bid.index])
             self.by_date[p] = {d: bid[keys == d] for d in sorted(set(keys))}
+            self.ask_by_date[p] = {d: ask[keys == d] for d in sorted(set(keys))}
+
+    def _spread_series(self, p, idx):
+        base = DEFAULT_SPREAD.get(p, 1.0)
+        jh = idx.tz_convert("Asia/Tokyo").hour
+        return pd.Series([self.sp_hour.get(h, base) * pip(p) for h in jh], index=idx)
 
     def set_now(self, t):
         self.now = pd.Timestamp(t)
@@ -70,7 +80,7 @@ class FakeGMO:
             rows = []
             for p in self.mid:
                 m, is_open = self._price_now(p)
-                hs = DEFAULT_SPREAD.get(p, 1.0) * pip(p) / 2
+                hs = self._spread_series(p, pd.DatetimeIndex([self.now.floor("h")])).iloc[0] / 2
                 prec = 3 if p.endswith("JPY") else 5
                 rows.append({"symbol": p, "bid": f"{m - hs:.{prec}f}", "ask": f"{m + hs:.{prec}f}",
                              "timestamp": self.now.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
@@ -81,12 +91,11 @@ class FakeGMO:
             if d < FIRST_H1_DATE:
                 return {"status": 1, "messages": [{"message_code": "ERR-5106", "message_string": "Invalid date."}],
                         "responsetime": self.now.isoformat()}
-            day = self.by_date.get(params["symbol"], {}).get(d)
+            src = self.ask_by_date if params["priceType"] == "ASK" else self.by_date
+            day = src.get(params["symbol"], {}).get(d)
             if day is None:
                 return self._ok([])
             day = day[day.index <= self.now]          # 進行中の足まで（最終値のまま）
-            if params["priceType"] == "ASK":
-                day = day + DEFAULT_SPREAD.get(params["symbol"], 1.0) * pip(params["symbol"])
             prec = 3 if params["symbol"].endswith("JPY") else 5
             return self._ok([{"openTime": str(int(t.value // 10**6)), "open": f"{r.open:.{prec}f}",
                               "high": f"{r.high:.{prec}f}", "low": f"{r.low:.{prec}f}",

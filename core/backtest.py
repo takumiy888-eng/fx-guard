@@ -32,14 +32,20 @@ def run(data: dict[str, pd.DataFrame], params: dict | None = None, gates: dict |
     p = params_with_defaults(params)
     g = {**DEFAULT_GATES, **(gates or {})}
     blocks = blocks or []
+    actual = spread is None          # spread を指定しなければ、データにある実際のスプレッドを使う
     spread = {**DEFAULT_SPREAD, **(spread or {})}
     max_hold = int(math.ceil(p["max_hold_hours"] * 3600 / BAR.total_seconds()))
 
     prep = prepared or {pair: prepare(df, p) for pair, df in data.items()}
     rows = {}
     for pair, s in prep.items():
+        src = data.get(pair)
+        if actual and src is not None and "spread" in src.columns:
+            sp = src["spread"].reindex(s.index).to_numpy(dtype=float)
+        else:
+            sp = np.full(len(s), np.nan)
         rows[pair] = dict(zip(s.index, zip(s["open"], s["high"], s["low"], s["close"], s["atr"],
-                                           s["signal"], s["vol_ratio"], s["adx"])))
+                                           s["signal"], s["vol_ratio"], s["adx"], sp)))
     times = sorted(set().union(*[r.keys() for r in rows.values()])) if rows else []
 
     open_pos: dict[str, Position] = {}
@@ -55,8 +61,8 @@ def run(data: dict[str, pd.DataFrame], params: dict | None = None, gates: dict |
             r = R.get(t)
             if r is None:
                 continue
-            o, h, l, c, a, sg, vr, ax = r
-            hs = spread.get(pair, 1.0) * pip(pair) / 2
+            o, h, l, c, a, sg, vr, ax, spb = r
+            hs = spb / 2 if np.isfinite(spb) else spread.get(pair, 1.0) * pip(pair) / 2
             slip = slippage_pips * pip(pair)
 
             # 1) 前の足で決めたエントリーを始値で約定

@@ -18,9 +18,9 @@ from tests.synth import fx_hours, make  # noqa: E402
 H = pd.Timedelta(hours=1)
 
 
-def _setup(now="2025-03-05 06:20", n=6500, t0="2024-09-02"):
+def _setup(now="2025-03-05 06:20", n=6500, t0="2024-09-02", spread_by_jst_hour=None):
     mid = {"USD_JPY": fx_hours(make(n=n, seed=5, t0=t0)), "EUR_USD": fx_hours(make(n=n, seed=6, start=1.08, t0=t0))}
-    fake = FakeGMO(mid)
+    fake = FakeGMO(mid, spread_by_jst_hour=spread_by_jst_hour)
     clock = {"t": pd.Timestamp(now, tz="UTC").to_pydatetime()}
     fake.set_now(clock["t"])
     gmo = GMOPublic(http_get=fake.get, min_interval=0, sleep=lambda s: None)
@@ -151,3 +151,25 @@ def test_take_profit_by_ticker():
     tid = acct.market_order("USD_JPY", -100, f"{ask + 5:.3f}", f"{ask + 0.5:.3f}", tag="fxguard")["orderFillTransaction"]["tradeOpened"]["tradeID"]
     assert acct.sync() == [tid]                          # 売りの利確値が現在のAskより上 → すぐ利確
     assert acct.trade(tid)["closeReason"] == "利確"
+
+
+# ---------------------------------------------------------------- 売値・買値の両方
+def test_mid_and_actual_spread_from_bid_and_ask():
+    """早朝（日本時間6〜7時）だけスプレッドが5pipsに広がる相場で、仲値と実際のスプレッドを正しく再現する"""
+    fake, acct, clock, mid = _setup(now="2025-03-05 06:20", spread_by_jst_hour={6: 5.0, 7: 5.0})
+    df = acct.history_df("USD_JPY", "H1", pd.Timestamp("2025-02-03", tz="UTC"), pd.Timestamp("2025-03-05", tz="UTC"))
+    assert acct.ask_ready(["USD_JPY"])
+    ref = mid["USD_JPY"].reindex(df.index)
+    assert (df.close - ref.close).abs().max() < 0.002               # 仲値は元の値と一致（表示桁の丸めのみ）
+    jh = df.index.tz_convert("Asia/Tokyo").hour
+    wide, normal = df.spread[(jh == 6) | (jh == 7)], df.spread[(jh >= 10) & (jh <= 20)]
+    assert abs(wide.mean() - 0.05) < 0.002 and abs(normal.mean() - 0.004) < 0.001
+
+
+def test_backtest_charges_actual_spread():
+    from core import backtest as B
+    fake, acct, clock, mid = _setup(now="2025-05-01 06:20", spread_by_jst_hour={h: 3.0 for h in range(24)})
+    df = acct.history_df("USD_JPY", "H1", pd.Timestamp("2024-09-02", tz="UTC"), pd.Timestamp("2025-05-01", tz="UTC"))
+    real = B.stats(B.run({"USD_JPY": df}, gates={"session_start": 0, "session_end": 0})["trades"])
+    cheap = B.stats(B.run({"USD_JPY": df}, gates={"session_start": 0, "session_end": 0}, spread={"USD_JPY": 0.4})["trades"])
+    assert real["n"] > 20 and real["avg_r"] < cheap["avg_r"]       # 実際の3pipsは標準0.4pipsより不利になる
