@@ -137,7 +137,8 @@ class Learner:
         if self._block_key(new_blocks) != self._block_key(blocks):
             cur_oos = B.stats(self._apply_blocks(oos_all, blocks))
             new_oos = B.stats(self._apply_blocks(oos_all, new_blocks))
-            if new_oos["avg_r"] + 0.02 >= cur_oos["avg_r"] and new_oos["n"] >= CRIT["oos_min_n"] // 2:
+            # 学習に使っていない後半期間で「はっきり良くなる」時だけ採用（わずかでも悪化するなら見送る）
+            if new_oos["avg_r"] >= cur_oos["avg_r"] + 0.01 and new_oos["n"] >= CRIT["oos_min_n"] // 2:
                 added = [b for b in new_blocks if self._bk(b) not in {self._bk(x) for x in blocks}]
                 removed = [b for b in blocks if self._bk(b) not in {self._bk(x) for x in new_blocks}]
                 for b in added:

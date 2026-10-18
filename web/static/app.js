@@ -46,6 +46,7 @@ async function loadHome() {
   $("#setupBanner").classList.toggle("hidden", !preparing);
   $("#setupState").textContent = preparing && s.state ? "いまの状態：" + s.state : "";
   $("#deadBanner").classList.toggle("hidden", !s.updated || o.alive);
+  $("#edgeBanner").classList.toggle("hidden", !/様子見/.test(s.state || ""));
   const chip = $("#stateChip");
   const st = !o.alive && s.updated ? "Bot応答なし" : s.state || "起動待ち";
   chip.textContent = /初回|過去データ/.test(st) ? "初回準備中" : st.length > 10 ? st.slice(0, 10) + "…" : st;

@@ -27,6 +27,7 @@ from .risk import RISK_LEVELS, RULES, LadderState, calc_units, effective_risk, l
 from .strategy import BAR, features, lookback_bars, params_with_defaults, prepare
 
 TAG = "fxguard"
+EDGE = {"min_trades": 30, "min_avg_r": 0.05, "min_pf": 1.15}   # 取引してよい最低条件（学習の後半期間）
 JST = timezone(timedelta(hours=9))
 
 
@@ -183,6 +184,28 @@ class Engine:
             self._err(f"学習に失敗（前回の学習結果で運用継続）: {e}")
             return
         self._weekly_risk_review(summary, now)
+
+    # ------------------------------------------------------------ 優位性の確認
+    def _edge_ok(self) -> bool:
+        """最新の学習で「勝てる根拠」が確認できている時だけ新規エントリーする（負けているルールでは取引しない）"""
+        L = self.db.kv_get("learning") or {}
+        st = L.get("stats") or {}
+        oos, whole = st.get("oos") or {}, st.get("all") or {}
+        ok = (oos.get("n", 0) >= EDGE["min_trades"] and oos.get("avg_r", 0) >= EDGE["min_avg_r"]
+              and oos.get("pf", 0) >= EDGE["min_pf"] and whole.get("avg_r", 0) > 0)
+        prev = self.db.kv_get("edge_ok")
+        if prev is None or bool(prev) != ok:
+            self.db.kv_set("edge_ok", ok)
+            if ok:
+                msg = (f"✅ 検証で優位性を確認（後半期間 {oos.get('n', 0)}回・PF {oos.get('pf', 0):.2f}・"
+                       f"平均{oos.get('avg_r', 0):+.2f}R）。条件が揃えば取引します")
+            else:
+                msg = (f"⏸ 検証で勝てる根拠が確認できないため、新規の取引を止めて様子見します（後半期間 PF "
+                       f"{oos.get('pf', 0):.2f}・平均{oos.get('avg_r', 0):+.2f}R）。シグナルは影のトレードとして記録し、"
+                       f"毎週の学習で再判定します")
+            self.db.log("risk", msg)
+            self.notify(msg)
+        return ok
 
     # ------------------------------------------------------------ 週次のリスク段階見直し
     def _weekly_risk_review(self, summary: dict, now: datetime):
@@ -378,6 +401,8 @@ class Engine:
                     break
         if self.db.kv_get("paused"):
             halt = halt or "一時停止中"
+        if not self._edge_ok():
+            halt = halt or "様子見（検証で優位性なし）"
 
         # --- 新しい足の確定 → シグナル
         positions = [(t["pair"], int(t["side"])) for t in db_open.values() if t["id"] in live_open]
