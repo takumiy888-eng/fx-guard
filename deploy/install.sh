@@ -2,12 +2,13 @@
 # FX Guard を VPS（Ubuntu 22.04 / 24.04）に導入する
 #
 # VPSのコンソールに1行貼り付けるだけ:
-#   curl -fsSL https://raw.githubusercontent.com/<ユーザー名>/<リポジトリ>/main/deploy/install.sh | sudo bash -s -- https://github.com/<ユーザー名>/<リポジトリ>.git
-# （コードをVPSに置いてある場合は: sudo bash deploy/install.sh）
+#   curl -fsSL https://raw.githubusercontent.com/takumiy888-eng/fx-guard/main/deploy/install.sh | sudo bash
+# （別のリポジトリから入れる場合は末尾に  -s -- https://github.com/<ユーザー名>/<リポジトリ>.git ）
 #
 # やること: Python環境 / 専用ユーザー / 自動起動・自動再起動 / HTTPS（無料証明書）/ ファイアウォール / 見張り番
 set -euo pipefail
 
+DEFAULT_REPO="https://github.com/takumiy888-eng/fx-guard.git"
 REPO="${1:-}"
 APP=/opt/fxguard
 SVC_USER=fxguard
@@ -18,18 +19,18 @@ say() { printf '\n\033[1;36m▶ %s\033[0m\n' "$*"; }
 
 say "必要なソフトを入れています（数分かかります）"
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -y -q
-apt-get install -y -q python3 python3-venv python3-pip git curl ufw gnupg \
+APT="apt-get -o DPkg::Lock::Timeout=900 -y -q"   # 起動直後の自動更新が終わるのを待つ
+$APT update
+$APT install python3 python3-venv python3-pip git curl ufw gnupg \
   debian-keyring debian-archive-keyring apt-transport-https unattended-upgrades >/dev/null
 
 say "プログラムを配置しています"
-if [ -n "$REPO" ]; then
-  if [ -d "$APP/.git" ]; then git -C "$APP" pull --ff-only; else git clone --depth 1 "$REPO" "$APP"; fi
-elif [ -f "$SRC_DIR/run_bot.py" ]; then
-  mkdir -p "$APP"
-  if [ "$SRC_DIR" != "$APP" ]; then cp -r "$SRC_DIR"/. "$APP"/; fi
+git config --global --add safe.directory "$APP" 2>/dev/null || true
+if [ -z "$REPO" ] && [ -f "$SRC_DIR/run_bot.py" ] && [ "$SRC_DIR" != "$APP" ]; then
+  mkdir -p "$APP"; cp -r "$SRC_DIR"/. "$APP"/
 else
-  echo "プログラムが見つかりません。GitHubのURLを付けて実行してください"; exit 1
+  REPO="${REPO:-$DEFAULT_REPO}"
+  if [ -d "$APP/.git" ]; then git -C "$APP" pull --ff-only; else git clone --depth 1 "$REPO" "$APP"; fi
 fi
 
 id "$SVC_USER" >/dev/null 2>&1 || useradd --system --home "$APP" --shell /usr/sbin/nologin "$SVC_USER"
@@ -42,8 +43,12 @@ chown -R "$SVC_USER:$SVC_USER" "$APP"
 # メモリが少ないVPS向けにスワップを用意（学習時の一時的なメモリ不足対策）
 if [ "$(swapon --show | wc -l)" -eq 0 ] && [ "$(free -m | awk '/Mem:/{print $2}')" -lt 2000 ]; then
   say "スワップ領域（1GB）を作成"
-  fallocate -l 1G /swapfile && chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile
-  grep -q '/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  if { fallocate -l 1G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=1024 status=none; } \
+     && chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile; then
+    grep -q '/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  else
+    echo "（スワップは作れませんでしたが、そのまま続けます）"
+  fi
 fi
 
 PW_FILE="$APP/.initial_password"
@@ -120,7 +125,7 @@ say "HTTPS（無料証明書）を設定"
 if ! command -v caddy >/dev/null; then
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/apt/sources.list.d/caddy-stable.list
-  apt-get update -y -q && apt-get install -y -q caddy >/dev/null
+  $APT update && $APT install caddy >/dev/null
 fi
 IP="$(curl -fsS -4 https://api.ipify.org || curl -fsS -4 ifconfig.me)"
 HOST="${IP//./-}.sslip.io"
@@ -136,7 +141,12 @@ say "ファイアウォールを設定（SSH・HTTP・HTTPSのみ許可）"
 ufw allow OpenSSH >/dev/null; ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null
 ufw --force enable >/dev/null
 
-sleep 3
+say "管理画面の準備を確認しています（最大2分）"
+WEB_OK=0
+for i in $(seq 1 24); do
+  if curl -fsS -m 5 "https://$HOST/api/me" >/dev/null 2>&1; then WEB_OK=1; break; fi
+  sleep 5
+done
 echo
 echo "============================================================"
 echo "  ✅ FX Guard の導入が完了しました"
@@ -147,6 +157,12 @@ echo "  パスワード: $(cat "$PW_FILE")"
 echo "  （ログイン後、設定タブで変更できます。この画面を閉じる前に控えてください）"
 fi
 echo
+if [ "$WEB_OK" -ne 1 ]; then
+echo "  ⚠ まだ管理画面に繋がりません。VPS会社の管理画面で「Web（80/443番ポート）」の"
+echo "    通信を許可してください（ConoHa: セキュリティグループ / Xserver: パケットフィルター）。"
+echo "    許可すれば数分で開けるようになります（このコマンドの再実行は不要）。"
+echo
+fi
 echo "  あとは何もしなくて大丈夫です。"
 echo "  Botが自動で過去データを取得・学習し（30分ほど）、そのまま運用を始めます"
 echo "============================================================"

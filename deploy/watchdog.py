@@ -15,8 +15,12 @@ def main():
     db = HOME / "data" / "fxguard.db"
     if not db.exists():
         return
-    con = sqlite3.connect(db, timeout=10)
-    row = con.execute("SELECT value FROM kv WHERE key='status'").fetchone()
+    try:  # 読み取り専用で開く（root が補助ファイルを作って Bot が書けなくなるのを防ぐ）
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=10)
+        row = con.execute("SELECT value FROM kv WHERE key='status'").fetchone()
+        con.close()
+    except sqlite3.Error:
+        return
     if not row:
         return
     st = json.loads(row[0])

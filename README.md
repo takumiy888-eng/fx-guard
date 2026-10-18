@@ -12,9 +12,9 @@
 
 1. **GitHub** に `fx-guard` という空のリポジトリ（Public）を作り、このフォルダの中身を入れる
 2. **VPS を契約**（Ubuntu 22.04 か 24.04、メモリ1GB以上。月1,000円前後）
-3. VPS のコンソールに次の1行を貼り付けて Enter（`<ユーザー名>` は自分のGitHub名）
+3. VPS のコンソールに次の1行を貼り付けて Enter
    ```
-   curl -fsSL https://raw.githubusercontent.com/<ユーザー名>/fx-guard/main/deploy/install.sh | sudo bash -s -- https://github.com/<ユーザー名>/fx-guard.git
+   curl -fsSL https://raw.githubusercontent.com/takumiy888-eng/fx-guard/main/deploy/install.sh | sudo bash
    ```
 4. 最後に表示される **管理画面のURL** と **パスワード** を控えて、スマホで開く
 
